@@ -1,6 +1,8 @@
 from multiprocessing import Queue, Process
 import logging, time, os, signal, typing
 from queue import Empty
+import wandb
+from wandb import AlertLevel
 
 
 def get_logger():
@@ -90,8 +92,11 @@ class Heartbeat():
   _process: Process
   _timeout: int
   _kill_timeout: int
+  use_wandb: bool
+  wandb_alert_str : str
+  wandb_alert_proj : str
 
-  def __init__(self, timeout: int, kill_timeout: int = 15) -> None:
+  def __init__(self, timeout: int, use_wandb: str , wandb_alert_str : str, wandb_alert_proj : str,kill_timeout: int = 15) -> None:
     """
     timeout     : default timeout for pulse() function, integer, minimum 1
     kill_timeout: time difference between initial SIGTERM and final SIGKILL, int, default 15.
@@ -100,6 +105,10 @@ class Heartbeat():
     self._queue = Queue()
     self._timeout = timeout
     self._kill_timeout = kill_timeout
+    self.use_wandb = use_wandb
+    if self.use_wandb:
+      self.wandb_alert_str = wandb_alert_str
+      self.wandb_alert_proj = wandb_alert_proj
     ppid = os.getpid()
     self._process = Process(
         target=hang_watcher,
@@ -108,6 +117,15 @@ class Heartbeat():
     logger.warn(
         "Started heartbeat checking process with default timeout {timeout}, process pid={pp}"
         .format(timeout=timeout, pp=self._process.pid))
+
+  def log_wandb(self):
+    if self.use_wandb:
+      wandb.alert(
+            title=f'Wandb Job Killed',
+            text=self.wandb_alert_str,
+            level=AlertLevel.WARN,
+            wait_duration=10
+            )
 
   def __del__(self):
     logger.warn("Terminating subprocess")
@@ -128,3 +146,5 @@ class Heartbeat():
     """ Stops the current kill timer
     """
     self._queue.put_nowait(("STOP", None))
+    #Log to wandb
+    self.log_wandb()
